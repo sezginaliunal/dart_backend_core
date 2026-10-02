@@ -1,35 +1,56 @@
+import 'package:base_backend/core/services/mongo/mongo_repository.dart';
+
 import '../../../core/result/result.dart';
 import 'users_model.dart';
 
-class UsersRepository {
-  Future<Result<UsersModel>> findById(String id) async {
-    try {
-      // TODO: Veritabanı sorgusu (SQL / ORM)
-      // Örnek sahte veri kontrolü:
-      if (id == '404') {
-        return Result.failure(const NotFoundFailure('Users bulunamadı'));
-      }
+class UsersRepository extends MongoRepository<UsersModel> {
+  UsersRepository._internal()
+    : super(
+        collectionName: 'users',
+        fromMap: UsersModel.fromJson,
+        toMap: (u) => u.toJson(),
+      );
 
-      final model = UsersModel(id: id);
-      return Result.success(model);
-    } catch (e) {
-      return Result.failure(ServerFailure(e.toString()));
-    }
-  }
+  // Router'da `UsersRepository()` çağırdığınız için factory şart,
+  // aksi halde private constructor yüzünden derlenmez.
+  static final UsersRepository instance = UsersRepository._internal();
+  factory UsersRepository() => instance;
 
-  Future<Result<List<UsersModel>>> findAll() async {
-    try {
-      return Result.success(UsersModel.users);
-    } catch (e) {
-      return Result.failure(ServerFailure(e.toString()));
-    }
-  }
+  Future<Result<UsersModel>> findById(String id) => guard(() async {
+    final user = await getById(id); // içeride ObjectId.parse yapılır
+    return user == null
+        ? Result.failure(NotFoundFailure('Users bulunamadı: $id'))
+        : Result.success(user);
+  });
 
-  Future<Result<bool>> deleteById(String id) async {
-    try {
-      return Result.success(true);
-    } catch (e) {
-      return Result.failure(ServerFailure(e.toString()));
-    }
-  }
+  Future<Result<List<UsersModel>>> findAll({
+    Map<String, dynamic>? filter,
+    Map<String, int>? sort,
+    int? skip,
+    int? limit,
+  }) => guardValue(
+    () => getAll(filter: filter, sort: sort, skip: skip, limit: limit),
+  );
+
+  Future<Result<UsersModel>> createUser(UsersModel user) =>
+      guardValue(() => create(user));
+
+  Future<Result<UsersModel>> updateUser(String id, UsersModel user) =>
+      guard(() async {
+        final updated = await update(id, user);
+        if (!updated) {
+          return Result.failure(NotFoundFailure('Users bulunamadı: $id'));
+        }
+        final fresh = await getById(id);
+        return fresh == null
+            ? Result.failure(NotFoundFailure('Users bulunamadı: $id'))
+            : Result.success(fresh);
+      });
+
+  Future<Result<bool>> deleteById(String id) => guard(() async {
+    final deleted = await delete(id);
+    return deleted
+        ? const Result.success(true)
+        : Result.failure(NotFoundFailure('Users bulunamadı: $id'));
+  });
 }

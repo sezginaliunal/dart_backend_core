@@ -8,8 +8,9 @@ environment:
 
 # Add regular dependencies here.
 dependencies:
-  crypto: ^3.0.7
-  dart_jsonwebtoken: ^3.4.1
+  crypto: 
+  encrypt:
+  dart_jsonwebtoken: 
   dotenv: ^4.2.0
   json_annotation: ^4.12.0
   logger: ^2.7.0

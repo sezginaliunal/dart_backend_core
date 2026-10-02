@@ -46,6 +46,12 @@ class UnauthorizedFailure extends Failure {
   const UnauthorizedFailure(super.message);
 }
 
+class TooManyRequestsFailure extends Failure {
+  const TooManyRequestsFailure([
+    super.message = 'Rate limit aşıldı. Lütfen daha sonra tekrar deneyin.',
+  ]);
+}
+
 class NotGenerateJwtFailure extends Failure {
   const NotGenerateJwtFailure(super.message);
 }

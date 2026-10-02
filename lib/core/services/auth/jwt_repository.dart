@@ -1,3 +1,4 @@
+import 'package:base_backend/core/env/env_repository.dart';
 import 'package:base_backend/core/result/result.dart';
 import 'package:base_backend/core/services/auth/models/jwt_payload.dart';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
@@ -34,7 +35,9 @@ class JwtRepository implements IJwtRepository {
 
       // Sign it (default with HS256 algorithm)
       final token = jwt.sign(
-        expiresIn: const Duration(seconds: 10),
+        expiresIn: Duration(
+          minutes: EnvRepository.instance.jwtAccessTokenExpiryMinutes,
+        ),
         SecretKey('secret passphrase'),
       );
 

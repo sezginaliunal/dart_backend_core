@@ -1,16 +1,21 @@
+import 'package:base_backend/core/services/mongo/object_id_converter.dart';
+import 'package:json_annotation/json_annotation.dart';
+
+part 'users_model.g.dart';
+
+@JsonSerializable()
 class UsersModel {
-  final String id;
+  @JsonKey(name: '_id', includeIfNull: false)
+  @ObjectIdConverter()
+  final String? id;
 
-  UsersModel({required this.id});
+  final String name;
+  final String email;
 
-  factory UsersModel.fromJson(Map<String, dynamic> json) {
-    return UsersModel(id: json['id'].toString());
-  }
+  UsersModel({this.id, required this.name, required this.email});
 
-  Map<String, dynamic> toJson() => {'id': id};
+  factory UsersModel.fromJson(Map<String, dynamic> json) =>
+      _$UsersModelFromJson(json);
 
-  static final List<UsersModel> users = List.generate(
-    10,
-    (index) => UsersModel(id: index.toString()),
-  );
+  Map<String, dynamic> toJson() => _$UsersModelToJson(this);
 }

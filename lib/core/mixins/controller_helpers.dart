@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:base_backend/core/constants/project_constants.dart';
 import 'package:base_backend/core/result/result.dart';
 import 'package:base_backend/core/result/result_shelf_extension.dart';
 import 'package:shelf/shelf.dart';
@@ -8,28 +9,27 @@ typedef FromJson<T> = T Function(Map<String, dynamic> json);
 
 int _idSeq = 0;
 
-/// Tüm controller'lar için ortak yardımcılar.
-/// Kullanım: class UsersController with ControllerHelpers { ... }
 mixin ControllerHelpers {
   // ───────────── Yetki ─────────────
 
-  bool isAdmin(Request request) => request.context['role'] == 'ADMIN';
+  bool isAdmin(Request request) =>
+      request.context[ProjectConstants.contextUserRoleKey] ==
+      ProjectConstants.roleAdmin;
 
   String? currentUserId(Request request) =>
-      request.context['userId'] as String?;
+      request.context[ProjectConstants.contextUserIdKey] as String?;
 
   // ───────────── Hazır hata cevapları ─────────────
 
   Response invalidBody() => Result<Never>.failure(
-        const ValidationFailure('Geçersiz istek gövdesi'),
-      ).toResponse();
+    ValidationFailure(ProjectConstants.failures.invalidBody),
+  ).toResponse();
 
   Response forbidden(String message) =>
       Result<Never>.failure(UnauthorizedFailure(message)).toResponse();
 
   // ───────────── Body okuma / parse ─────────────
 
-  /// Body'yi JSON olarak okur. Hata olursa null döner.
   Future<Object?> readBody(Request request) async {
     try {
       return jsonDecode(await request.readAsString());
@@ -38,8 +38,6 @@ mixin ControllerHelpers {
     }
   }
 
-  /// Body'den tek model üretir. id yoksa otomatik üretir.
-  /// Hata olursa null döner.
   T? parseModel<T>(
     Map<String, dynamic> json,
     FromJson<T> fromJson, {
@@ -54,8 +52,6 @@ mixin ControllerHelpers {
     }
   }
 
-  /// Body'den model listesi üretir.
-  /// Tek bir eleman bile hatalıysa null döner.
   List<T>? parseList<T>(
     Object? body,
     FromJson<T> fromJson, {
@@ -75,7 +71,6 @@ mixin ControllerHelpers {
     return models;
   }
 
-  /// { "ids": ["1", "2"] } gövdesinden id listesi çıkarır.
   List<String>? parseIds(Object? body) {
     if (body is! Map<String, dynamic>) return null;
 

@@ -1,5 +1,9 @@
 import 'dart:convert';
+
+import 'package:mongo_dart/mongo_dart.dart';
 import 'package:shelf/shelf.dart';
+
+import 'api_serializable.dart';
 import 'result.dart';
 
 extension ResultShelfX<T> on Result<T> {
@@ -18,12 +22,12 @@ extension ResultShelfX<T> on Result<T> {
     int statusCode,
     Object? Function(T data)? customToJson,
   ) {
-    Object? body;
+    final Object? body;
 
     if (customToJson != null) {
       body = customToJson(data);
     } else if (data is List) {
-      body = data.map((item) => _serializeItem(item)).toList();
+      body = data.map(_serializeItem).toList();
     } else {
       body = _serializeItem(data);
     }
@@ -56,15 +60,34 @@ extension ResultShelfX<T> on Result<T> {
         headers: headers,
       ),
       JwtFailure() => Response(401, body: errorBody, headers: headers),
+      TooManyRequestsFailure() => Response(
+        429,
+        body: errorBody,
+        headers: headers,
+      ),
     };
   }
 
   Object? _serializeItem(dynamic item) {
     if (item == null) return null;
+    if (item is ApiSerializable)
+      return item.toApiJson(); // gizli alanlı modeller
     try {
-      return (item as dynamic).toJson();
+      return _sanitize((item as dynamic).toJson());
     } catch (_) {
-      return item;
+      return _sanitize(item); // bool, int, String vb.
     }
   }
 }
+
+/// Mongo tiplerini JSON'a uygun hale getirir.
+/// ObjectId -> String, `_id` -> `id`, DateTime -> ISO string.
+Object? _sanitize(Object? value) => switch (value) {
+  ObjectId() => value.oid,
+  DateTime() => value.toIso8601String(),
+  Map() => value.map(
+    (k, v) => MapEntry(k == '_id' ? 'id' : k.toString(), _sanitize(v)),
+  ),
+  List() => value.map(_sanitize).toList(),
+  _ => value,
+};

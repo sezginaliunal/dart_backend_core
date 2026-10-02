@@ -2,11 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
-
+import 'package:encrypt/encrypt.dart' as enc;
+import 'package:base_backend/core/constants/project_constants.dart';
 import 'package:base_backend/core/result/result.dart';
 import 'package:crypto/crypto.dart';
 
-/// crypto paketinin desteklediği hash algoritmaları.
 enum HashAlgorithm {
   md5,
   sha1,
@@ -18,39 +18,33 @@ enum HashAlgorithm {
   sha512_256,
 }
 
-/// Çıktının hangi formatta döneceği.
 enum DigestEncoding { hex, base64 }
 
 abstract interface class ICryptoRepository {
-  /// String girdiyi hash'ler.
   Result<String> hash(
     String input, {
     HashAlgorithm algorithm = HashAlgorithm.sha256,
     DigestEncoding encoding = DigestEncoding.hex,
   });
 
-  /// Ham byte listesini hash'ler.
   Result<String> hashBytes(
     List<int> bytes, {
     HashAlgorithm algorithm = HashAlgorithm.sha256,
     DigestEncoding encoding = DigestEncoding.hex,
   });
 
-  /// Stream'i parça parça hash'ler (büyük veriler için bellek dostu).
   Future<Result<String>> hashStream(
     Stream<List<int>> stream, {
     HashAlgorithm algorithm = HashAlgorithm.sha256,
     DigestEncoding encoding = DigestEncoding.hex,
   });
 
-  /// Dosya hash'i (dosya bütünlüğü / checksum kontrolü).
   Future<Result<String>> hashFile(
     File file, {
     HashAlgorithm algorithm = HashAlgorithm.sha256,
     DigestEncoding encoding = DigestEncoding.hex,
   });
 
-  /// Girdinin beklenen hash ile eşleşip eşleşmediğini sabit-zamanlı kontrol eder.
   Result<bool> verifyHash(
     String input,
     String expectedHash, {
@@ -58,7 +52,6 @@ abstract interface class ICryptoRepository {
     DigestEncoding encoding = DigestEncoding.hex,
   });
 
-  /// HMAC üretir.
   Result<String> hmac(
     String message,
     String key, {
@@ -66,7 +59,6 @@ abstract interface class ICryptoRepository {
     DigestEncoding encoding = DigestEncoding.hex,
   });
 
-  /// HMAC doğrular (sabit-zamanlı karşılaştırma).
   Result<bool> verifyHmac(
     String message,
     String key,
@@ -75,38 +67,33 @@ abstract interface class ICryptoRepository {
     DigestEncoding encoding = DigestEncoding.hex,
   });
 
-  /// Kriptografik olarak güvenli rastgele salt üretir.
   Result<String> generateSalt({
-    int length = 16,
+    int length = ProjectConstants.defaultSaltLength,
     DigestEncoding encoding = DigestEncoding.base64,
   });
 
-  /// Güvenli rastgele token üretir (API key, reset token, refresh token vb.).
-  Result<String> generateSecureToken({int length = 32});
-
-  /// PBKDF2-HMAC-SHA256 ile parola hash'ler.
-  /// Çıktı formatı: pbkdf2_sha256$iterations$saltBase64$hashBase64
-  Result<String> hashPassword(
-    String password, {
-    int iterations = 100000,
-    int saltLength = 16,
-    int keyLength = 32,
+  Result<String> generateSecureToken({
+    int length = ProjectConstants.defaultSecureTokenLength,
   });
 
-  /// [hashPassword] ile üretilmiş kayıtlı hash'e karşı parolayı doğrular.
+  Result<String> hashPassword(
+    String password, {
+    int? iterations,
+    int saltLength = ProjectConstants.defaultSaltLength,
+    int keyLength = ProjectConstants.defaultKeyLength,
+  });
+
   Result<bool> verifyPassword(String password, String storedHash);
+  Result<String> encrypt(String plainText, String secretKey);
+
+  /// Şifrelenmiş metni gizli anahtar ile geri çözer.
+  Result<String> decrypt(String cipherText, String secretKey);
 }
 
 class CryptoRepository implements ICryptoRepository {
   CryptoRepository({Random? random}) : _random = random ?? Random.secure();
 
   final Random _random;
-
-  static const String _passwordPrefix = 'pbkdf2_sha256';
-
-  // ---------------------------------------------------------------------------
-  // Hash
-  // ---------------------------------------------------------------------------
 
   @override
   Result<String> hash(
@@ -131,7 +118,9 @@ class CryptoRepository implements ICryptoRepository {
       final digest = _resolve(algorithm).convert(bytes);
       return Result.success(_encode(digest, encoding));
     } catch (e) {
-      return Result.failure(ServerFailure('Hash işlemi başarısız: $e'));
+      return Result.failure(
+        ServerFailure('${ProjectConstants.failures.unhandledException}: $e'),
+      );
     }
   }
 
@@ -145,7 +134,9 @@ class CryptoRepository implements ICryptoRepository {
       final digest = await _resolve(algorithm).bind(stream).first;
       return Result.success(_encode(digest, encoding));
     } catch (e) {
-      return Result.failure(ServerFailure('Stream hash işlemi başarısız: $e'));
+      return Result.failure(
+        ServerFailure('${ProjectConstants.failures.unhandledException}: $e'),
+      );
     }
   }
 
@@ -158,7 +149,7 @@ class CryptoRepository implements ICryptoRepository {
     try {
       if (!await file.exists()) {
         return Result.failure(
-          NotFoundFailure('Dosya bulunamadı: ${file.path}'),
+          NotFoundFailure(ProjectConstants.failures.fileNotFound),
         );
       }
       return hashStream(
@@ -167,9 +158,15 @@ class CryptoRepository implements ICryptoRepository {
         encoding: encoding,
       );
     } on FileSystemException catch (e) {
-      return Result.failure(ServerFailure('Dosya okunamadı: ${e.message}'));
+      return Result.failure(
+        ServerFailure(
+          '${ProjectConstants.failures.fileNotFound}: ${e.message}',
+        ),
+      );
     } catch (e) {
-      return Result.failure(ServerFailure('Dosya hash işlemi başarısız: $e'));
+      return Result.failure(
+        ServerFailure('${ProjectConstants.failures.unhandledException}: $e'),
+      );
     }
   }
 
@@ -181,8 +178,8 @@ class CryptoRepository implements ICryptoRepository {
     DigestEncoding encoding = DigestEncoding.hex,
   }) {
     if (expectedHash.isEmpty) {
-      return const Result.failure(
-        ValidationFailure('Beklenen hash boş olamaz'),
+      return Result.failure(
+        ValidationFailure(ProjectConstants.failures.emptyHashInput),
       );
     }
     return hash(input, algorithm: algorithm, encoding: encoding).fold(
@@ -198,10 +195,6 @@ class CryptoRepository implements ICryptoRepository {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // HMAC
-  // ---------------------------------------------------------------------------
-
   @override
   Result<String> hmac(
     String message,
@@ -210,8 +203,8 @@ class CryptoRepository implements ICryptoRepository {
     DigestEncoding encoding = DigestEncoding.hex,
   }) {
     if (key.isEmpty) {
-      return const Result.failure(
-        ValidationFailure('HMAC anahtarı boş olamaz'),
+      return Result.failure(
+        ValidationFailure(ProjectConstants.failures.emptyHmacKey),
       );
     }
     try {
@@ -221,7 +214,9 @@ class CryptoRepository implements ICryptoRepository {
       ).convert(utf8.encode(message));
       return Result.success(_encode(digest, encoding));
     } catch (e) {
-      return Result.failure(ServerFailure('HMAC işlemi başarısız: $e'));
+      return Result.failure(
+        ServerFailure('${ProjectConstants.failures.unhandledException}: $e'),
+      );
     }
   }
 
@@ -234,8 +229,8 @@ class CryptoRepository implements ICryptoRepository {
     DigestEncoding encoding = DigestEncoding.hex,
   }) {
     if (expectedHmac.isEmpty) {
-      return const Result.failure(
-        ValidationFailure('Beklenen HMAC boş olamaz'),
+      return Result.failure(
+        ValidationFailure(ProjectConstants.failures.emptyHashInput),
       );
     }
     return hmac(message, key, algorithm: algorithm, encoding: encoding).fold(
@@ -251,18 +246,14 @@ class CryptoRepository implements ICryptoRepository {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Random
-  // ---------------------------------------------------------------------------
-
   @override
   Result<String> generateSalt({
-    int length = 16,
+    int length = ProjectConstants.defaultSaltLength,
     DigestEncoding encoding = DigestEncoding.base64,
   }) {
     if (length <= 0) {
-      return const Result.failure(
-        ValidationFailure('Salt uzunluğu 0\'dan büyük olmalı'),
+      return Result.failure(
+        ValidationFailure(ProjectConstants.failures.invalidSaltLength),
       );
     }
     try {
@@ -271,43 +262,48 @@ class CryptoRepository implements ICryptoRepository {
         encoding == DigestEncoding.hex ? _toHex(bytes) : base64Encode(bytes),
       );
     } catch (e) {
-      return Result.failure(ServerFailure('Salt üretilemedi: $e'));
+      return Result.failure(
+        ServerFailure('${ProjectConstants.failures.unhandledException}: $e'),
+      );
     }
   }
 
   @override
-  Result<String> generateSecureToken({int length = 32}) {
+  Result<String> generateSecureToken({
+    int length = ProjectConstants.defaultSecureTokenLength,
+  }) {
     if (length <= 0) {
-      return const Result.failure(
-        ValidationFailure('Token uzunluğu 0\'dan büyük olmalı'),
+      return Result.failure(
+        ValidationFailure(ProjectConstants.failures.invalidTokenLength),
       );
     }
     try {
       return Result.success(_toHex(_randomBytes(length)));
     } catch (e) {
-      return Result.failure(ServerFailure('Token üretilemedi: $e'));
+      return Result.failure(
+        ServerFailure('${ProjectConstants.failures.unhandledException}: $e'),
+      );
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Password (PBKDF2-HMAC-SHA256)
-  // ---------------------------------------------------------------------------
 
   @override
   Result<String> hashPassword(
     String password, {
-    int iterations = 100000,
-    int saltLength = 16,
-    int keyLength = 32,
+    int? iterations,
+    int saltLength = ProjectConstants.defaultSaltLength,
+    int keyLength = ProjectConstants.defaultKeyLength,
   }) {
+    final activeIterations =
+        iterations ?? ProjectConstants.defaultPbkdf2Iterations;
+
     if (password.isEmpty) {
-      return const Result.failure(ValidationFailure('Parola boş olamaz'));
+      return Result.failure(
+        ValidationFailure(ProjectConstants.failures.emptyPassword),
+      );
     }
-    if (iterations <= 0 || saltLength <= 0 || keyLength <= 0) {
-      return const Result.failure(
-        ValidationFailure(
-          'iterations, saltLength ve keyLength 0\'dan büyük olmalı',
-        ),
+    if (activeIterations <= 0 || saltLength <= 0 || keyLength <= 0) {
+      return Result.failure(
+        ValidationFailure(ProjectConstants.failures.invalidSaltLength),
       );
     }
     try {
@@ -315,34 +311,38 @@ class CryptoRepository implements ICryptoRepository {
       final derived = _pbkdf2(
         utf8.encode(password),
         salt,
-        iterations,
+        activeIterations,
         keyLength,
       );
       return Result.success(
-        '$_passwordPrefix\$$iterations\$${base64Encode(salt)}\$${base64Encode(derived)}',
+        '${ProjectConstants.passwordPrefix}\$$activeIterations\$${base64Encode(salt)}\$${base64Encode(derived)}',
       );
     } catch (e) {
-      return Result.failure(ServerFailure('Parola hash işlemi başarısız: $e'));
+      return Result.failure(
+        ServerFailure('${ProjectConstants.failures.unhandledException}: $e'),
+      );
     }
   }
 
   @override
   Result<bool> verifyPassword(String password, String storedHash) {
     if (password.isEmpty) {
-      return const Result.failure(ValidationFailure('Parola boş olamaz'));
+      return Result.failure(
+        ValidationFailure(ProjectConstants.failures.emptyPassword),
+      );
     }
 
     final parts = storedHash.split(r'$');
-    if (parts.length != 4 || parts[0] != _passwordPrefix) {
-      return const Result.failure(
-        ValidationFailure('Kayıtlı hash formatı geçersiz'),
+    if (parts.length != 4 || parts[0] != ProjectConstants.passwordPrefix) {
+      return Result.failure(
+        ValidationFailure(ProjectConstants.failures.invalidHashFormat),
       );
     }
 
     final iterations = int.tryParse(parts[1]);
     if (iterations == null || iterations <= 0) {
-      return const Result.failure(
-        ValidationFailure('Kayıtlı hash iterasyon değeri geçersiz'),
+      return Result.failure(
+        ValidationFailure(ProjectConstants.failures.invalidHashFormat),
       );
     }
 
@@ -357,11 +357,13 @@ class CryptoRepository implements ICryptoRepository {
       );
       return Result.success(_constantTimeEquals(derived, expected));
     } on FormatException {
-      return const Result.failure(
-        ValidationFailure('Kayıtlı hash base64 formatı geçersiz'),
+      return Result.failure(
+        ValidationFailure(ProjectConstants.failures.invalidHashFormat),
       );
     } catch (e) {
-      return Result.failure(ServerFailure('Parola doğrulama başarısız: $e'));
+      return Result.failure(
+        ServerFailure('${ProjectConstants.failures.unhandledException}: $e'),
+      );
     }
   }
 
@@ -392,7 +394,6 @@ class CryptoRepository implements ICryptoRepository {
     List<int>.generate(length, (_) => _random.nextInt(256)),
   );
 
-  /// Timing attack'lara karşı sabit-zamanlı karşılaştırma.
   bool _constantTimeEquals(List<int> a, List<int> b) {
     if (a.length != b.length) return false;
     var diff = 0;
@@ -402,7 +403,6 @@ class CryptoRepository implements ICryptoRepository {
     return diff == 0;
   }
 
-  /// RFC 8018 PBKDF2 (HMAC-SHA256).
   Uint8List _pbkdf2(
     List<int> password,
     List<int> salt,
@@ -410,7 +410,7 @@ class CryptoRepository implements ICryptoRepository {
     int keyLength,
   ) {
     final hmacSha256 = Hmac(sha256, password);
-    const hashLength = 32;
+    final hashLength = ProjectConstants.pbkdf2HashLength;
     final blockCount = (keyLength / hashLength).ceil();
     final output = BytesBuilder(copy: false);
 
@@ -431,5 +431,48 @@ class CryptoRepository implements ICryptoRepository {
     }
 
     return Uint8List.fromList(output.toBytes().sublist(0, keyLength));
+  }
+
+  @override
+  Result<String> encrypt(String plainText, String secretKey) {
+    try {
+      final key = enc.Key.fromUtf8(
+        secretKey.padRight(32, '*').substring(0, 32),
+      ); // 32 byte key
+      final iv = enc.IV.fromSecureRandom(16); // 16 byte rastgele IV
+      final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
+
+      final encrypted = encrypter.encrypt(plainText, iv: iv);
+      // IV ve ciphertext'i birlikte birleştirip base64 formatında döndürüyoruz
+      final combined = '${iv.base64}:${encrypted.base64}';
+      return Result.success(base64Url.encode(utf8.encode(combined)));
+    } catch (e) {
+      return Result.failure(ServerFailure('Şifreleme hatası: $e'));
+    }
+  }
+
+  @override
+  Result<String> decrypt(String cipherText, String secretKey) {
+    try {
+      final decodedCombined = utf8.decode(base64Url.decode(cipherText));
+      final parts = decodedCombined.split(':');
+      if (parts.length != 2) {
+        return Result.failure(
+          ValidationFailure('Geçersiz şifrelenmiş token formatı'),
+        );
+      }
+
+      final iv = enc.IV.fromBase64(parts[0]);
+      final encryptedData = enc.Encrypted.fromBase64(parts[1]);
+      final key = enc.Key.fromUtf8(
+        secretKey.padRight(32, '*').substring(0, 32),
+      );
+      final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
+
+      final decrypted = encrypter.decrypt(encryptedData, iv: iv);
+      return Result.success(decrypted);
+    } catch (e) {
+      return Result.failure(ServerFailure('Şifre çözme hatası: $e'));
+    }
   }
 }
