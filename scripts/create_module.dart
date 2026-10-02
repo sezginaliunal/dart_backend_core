@@ -3,16 +3,22 @@ import 'dart:io';
 /// Kullanım:
 ///   dart run scripts/create_module.dart <modul_adi> [--no-build]
 ///
-/// --no-build : build_runner'ı otomatik çalıştırma
+/// --no-build        : build_runner'ı otomatik çalıştırma
+/// --update-helpers  : controller_helpers.dart varsa yedekleyip yeniden yazar
 void main(List<String> args) async {
   final flags = args.where((a) => a.startsWith('--')).toSet();
   final positional = args.where((a) => !a.startsWith('--')).toList();
 
+  // Sadece helpers güncelleme: dart run scripts/create_module.dart --update-helpers
+  if (positional.isEmpty && flags.contains('--update-helpers')) {
+    _ensureControllerHelpers(_readPackageName(), overwrite: true);
+    print('✅ controller_helpers.dart güncellendi.');
+    exit(0);
+  }
+
   if (positional.isEmpty) {
     print('❌ Hata: Modül adı giriniz!');
-    print(
-      'Kullanım: dart run scripts/create_module.dart <modul_adi> [--no-build]',
-    );
+    print('Kullanım: dart run scripts/create_module.dart <modul_adi> [--no-build]');
     exit(1);
   }
 
@@ -28,14 +34,14 @@ void main(List<String> args) async {
   }
 
   _checkDependencies();
+  _ensureControllerHelpers(pkg, overwrite: flags.contains('--update-helpers'));
 
   dir.createSync(recursive: true);
   print('🚀 "$snake" modülü oluşturuluyor...\n');
 
   final files = <String, String>{
     // 1. MODEL (json_serializable)
-    '${snake}_model.dart':
-        '''
+    '${snake}_model.dart': '''
 import 'package:json_annotation/json_annotation.dart';
 
 part '${snake}_model.g.dart';
@@ -64,8 +70,7 @@ class ${pascal}Model {
 ''',
 
     // 2. REPOSITORY
-    '${snake}_repository.dart':
-        '''
+    '${snake}_repository.dart': '''
 import 'package:$pkg/core/result/result.dart';
 import '${snake}_model.dart';
 
@@ -171,8 +176,7 @@ class ${pascal}Repository {
 ''',
 
     // 3. SERVICE
-    '${snake}_service.dart':
-        '''
+    '${snake}_service.dart': '''
 import 'package:$pkg/core/result/result.dart';
 import '${snake}_model.dart';
 import '${snake}_repository.dart';
@@ -280,17 +284,14 @@ class ${pascal}Service {
 ''',
 
     // 4. CONTROLLER
-    '${snake}_controller.dart':
-        '''
-import 'dart:convert';
-
-import 'package:$pkg/core/result/result.dart';
+    '${snake}_controller.dart': '''
+import 'package:$pkg/core/mixins/controller_helpers.dart';
 import 'package:$pkg/core/result/result_shelf_extension.dart';
 import 'package:shelf/shelf.dart';
 import '${snake}_model.dart';
 import '${snake}_service.dart';
 
-class ${pascal}Controller {
+class ${pascal}Controller with ControllerHelpers {
   final ${pascal}Service _service;
 
   ${pascal}Controller(this._service);
@@ -311,11 +312,11 @@ class ${pascal}Controller {
 
   /// POST /  →  body: { ... }
   Future<Response> create(Request request) async {
-    final body = await _readBody(request);
-    if (body is! Map<String, dynamic>) return _invalidBody();
+    final body = await readBody(request);
+    if (body is! Map<String, dynamic>) return invalidBody();
 
-    final model = _parseModel(body);
-    if (model == null) return _invalidBody();
+    final model = parseModel(body, ${pascal}Model.fromJson);
+    if (model == null) return invalidBody();
 
     final result = await _service.create(model);
     return result.toResponse();
@@ -323,12 +324,12 @@ class ${pascal}Controller {
 
   /// POST /bulk  →  body: [ { ... }, { ... } ]   (sadece ADMIN)
   Future<Response> bulkCreate(Request request) async {
-    if (!_isAdmin(request)) {
-      return _forbidden('Toplu ekleme sadece ADMIN tarafından yapılabilir.');
+    if (!isAdmin(request)) {
+      return forbidden('Toplu ekleme sadece ADMIN tarafından yapılabilir.');
     }
 
-    final models = _parseList(await _readBody(request));
-    if (models == null) return _invalidBody();
+    final models = parseList(await readBody(request), ${pascal}Model.fromJson);
+    if (models == null) return invalidBody();
 
     final result = await _service.bulkCreate(models);
     return result.toResponse();
@@ -338,20 +339,18 @@ class ${pascal}Controller {
 
   /// PUT /<id>  →  body: { ... }   (ADMIN veya kendi kaydı)
   Future<Response> update(Request request, String id) async {
-    final currentUserId = request.context['userId'] as String?;
-
-    if (!_isAdmin(request) && currentUserId != id) {
-      return _forbidden(
+    if (!isAdmin(request) && currentUserId(request) != id) {
+      return forbidden(
         'Sadece kendi hesabınızı veya ADMIN olarak bu hesabı güncelleyebilirsiniz.',
       );
     }
 
-    final body = await _readBody(request);
-    if (body is! Map<String, dynamic>) return _invalidBody();
+    final body = await readBody(request);
+    if (body is! Map<String, dynamic>) return invalidBody();
 
     // Path'teki id her zaman body'deki id'nin önüne geçer
-    final model = _parseModel(body, forceId: id);
-    if (model == null) return _invalidBody();
+    final model = parseModel(body, ${pascal}Model.fromJson, forceId: id);
+    if (model == null) return invalidBody();
 
     final result = await _service.update(id, model);
     return result.toResponse();
@@ -359,12 +358,16 @@ class ${pascal}Controller {
 
   /// PUT /bulk  →  body: [ { "id": "1", ... }, { "id": "2", ... } ]   (sadece ADMIN)
   Future<Response> bulkUpdate(Request request) async {
-    if (!_isAdmin(request)) {
-      return _forbidden('Toplu güncelleme sadece ADMIN tarafından yapılabilir.');
+    if (!isAdmin(request)) {
+      return forbidden('Toplu güncelleme sadece ADMIN tarafından yapılabilir.');
     }
 
-    final models = _parseList(await _readBody(request), requireId: true);
-    if (models == null) return _invalidBody();
+    final models = parseList(
+      await readBody(request),
+      ${pascal}Model.fromJson,
+      requireId: true,
+    );
+    if (models == null) return invalidBody();
 
     final result = await _service.bulkUpdate(models);
     return result.toResponse();
@@ -372,14 +375,10 @@ class ${pascal}Controller {
 
   // ───────────── DELETE ─────────────
 
+  /// DELETE /<id>   (ADMIN veya kendi kaydı)
   Future<Response> deleteById(Request request, String id) async {
-    final currentUserId = request.context['userId'] as String?;
-
-    // Kullanıcı ADMIN değilse VE kendi ID'sini silmeye çalışmıyorsa engelle
-    final isSelf = currentUserId == id;
-
-    if (!_isAdmin(request) && !isSelf) {
-      return _forbidden(
+    if (!isAdmin(request) && currentUserId(request) != id) {
+      return forbidden(
         'Sadece kendi hesabınızı veya ADMIN olarak bu hesabı silebilirsiniz.',
       );
     }
@@ -390,77 +389,21 @@ class ${pascal}Controller {
 
   /// DELETE /bulk  →  body: { "ids": ["1", "2", "3"] }   (sadece ADMIN)
   Future<Response> bulkDelete(Request request) async {
-    if (!_isAdmin(request)) {
-      return _forbidden('Toplu silme sadece ADMIN tarafından yapılabilir.');
+    if (!isAdmin(request)) {
+      return forbidden('Toplu silme sadece ADMIN tarafından yapılabilir.');
     }
 
-    final body = await _readBody(request);
-    if (body is! Map<String, dynamic> || body['ids'] is! List) {
-      return _invalidBody();
-    }
-
-    final ids = (body['ids'] as List).map((e) => e.toString()).toList();
+    final ids = parseIds(await readBody(request));
+    if (ids == null) return invalidBody();
 
     final result = await _service.bulkDelete(ids);
     return result.toResponse();
   }
-
-  // ───────────── HELPERS ─────────────
-
-  static int _seq = 0;
-
-  bool _isAdmin(Request request) => request.context['role'] == 'ADMIN';
-
-  Response _invalidBody() => Result<Never>.failure(
-        const ValidationFailure('Geçersiz istek gövdesi'),
-      ).toResponse();
-
-  Response _forbidden(String message) =>
-      Result<Never>.failure(UnauthorizedFailure(message)).toResponse();
-
-  Future<Object?> _readBody(Request request) async {
-    try {
-      return jsonDecode(await request.readAsString());
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Body'den model üretir. id yoksa otomatik üretir, hata olursa null döner.
-  ${pascal}Model? _parseModel(Map<String, dynamic> json, {String? forceId}) {
-    try {
-      final data = Map<String, dynamic>.from(json);
-      data['id'] = forceId ?? data['id'] ?? _generateId();
-      return ${pascal}Model.fromJson(data);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Body'den model listesi üretir. Tek bir eleman bile hatalıysa null döner.
-  List<${pascal}Model>? _parseList(Object? body, {bool requireId = false}) {
-    if (body is! List) return null;
-
-    final models = <${pascal}Model>[];
-    for (final item in body) {
-      if (item is! Map<String, dynamic>) return null;
-      if (requireId && item['id'] == null) return null;
-
-      final model = _parseModel(item);
-      if (model == null) return null;
-      models.add(model);
-    }
-    return models;
-  }
-
-  String _generateId() =>
-      DateTime.now().microsecondsSinceEpoch.toString() + (_seq++).toString();
 }
 ''',
 
     // 5. ROUTER (AppModule)
-    '${snake}_router.dart':
-        '''
+    '${snake}_router.dart': '''
 import 'package:$pkg/core/middlewares/auth_middleware.dart';
 import 'package:$pkg/core/module/app_module.dart';
 import 'package:shelf/shelf.dart';
@@ -543,13 +486,143 @@ class ${pascal}Router implements AppModule {
     if (code == 0) {
       print('\n✅ ${snake}_model.g.dart üretildi.');
     } else {
-      print(
-        '\n❌ build_runner hata verdi (kod: $code). Bağımlılıkları kontrol et.',
-      );
+      print('\n❌ build_runner hata verdi (kod: $code). Bağımlılıkları kontrol et.');
     }
   }
 
   print('\n📌 Unutma: "${pascal}Router()" sınıfını ana modül listene ekle.');
+}
+
+/// Ortak controller yardımcılarını (mixin) bir kez oluşturur.
+/// Dosya zaten varsa dokunmaz.
+void _ensureControllerHelpers(String pkg, {bool overwrite = false}) {
+  final file = File('lib/core/mixins/controller_helpers.dart');
+
+  if (file.existsSync()) {
+    if (!overwrite) {
+      // Dokunma, sadece gerekli üyeler eksik mi kontrol et
+      const required = [
+        'isAdmin',
+        'currentUserId',
+        'invalidBody',
+        'forbidden',
+        'readBody',
+        'parseModel',
+        'parseList',
+        'parseIds',
+        'generateId',
+      ];
+      final content = file.readAsStringSync();
+      final missing = required.where((m) => !content.contains(m)).toList();
+
+      if (missing.isNotEmpty) {
+        print('⚠️  ${file.path} mevcut ama şu üyeler eksik: ${missing.join(', ')}');
+        print('   Üretilen controller derlenmeyebilir. Güncellemek için:');
+        print('   dart run scripts/create_module.dart --update-helpers');
+        print('   (eski dosya controller_helpers.dart.bak olarak yedeklenir)\n');
+      }
+      return;
+    }
+
+    file.copySync('${file.path}.bak');
+    print('💾 Yedek alındı: ${file.path}.bak');
+  } else {
+    file.createSync(recursive: true);
+  }
+  file.writeAsStringSync('''
+import 'dart:convert';
+
+import 'package:$pkg/core/result/result.dart';
+import 'package:$pkg/core/result/result_shelf_extension.dart';
+import 'package:shelf/shelf.dart';
+
+typedef FromJson<T> = T Function(Map<String, dynamic> json);
+
+int _idSeq = 0;
+
+/// Tüm controller'lar için ortak yardımcılar.
+/// Kullanım: class UsersController with ControllerHelpers { ... }
+mixin ControllerHelpers {
+  // ───────────── Yetki ─────────────
+
+  bool isAdmin(Request request) => request.context['role'] == 'ADMIN';
+
+  String? currentUserId(Request request) =>
+      request.context['userId'] as String?;
+
+  // ───────────── Hazır hata cevapları ─────────────
+
+  Response invalidBody() => Result<Never>.failure(
+        const ValidationFailure('Geçersiz istek gövdesi'),
+      ).toResponse();
+
+  Response forbidden(String message) =>
+      Result<Never>.failure(UnauthorizedFailure(message)).toResponse();
+
+  // ───────────── Body okuma / parse ─────────────
+
+  /// Body'yi JSON olarak okur. Hata olursa null döner.
+  Future<Object?> readBody(Request request) async {
+    try {
+      return jsonDecode(await request.readAsString());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Body'den tek model üretir. id yoksa otomatik üretir.
+  /// Hata olursa null döner.
+  T? parseModel<T>(
+    Map<String, dynamic> json,
+    FromJson<T> fromJson, {
+    String? forceId,
+  }) {
+    try {
+      final data = Map<String, dynamic>.from(json);
+      data['id'] = forceId ?? data['id'] ?? generateId();
+      return fromJson(data);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Body'den model listesi üretir.
+  /// Tek bir eleman bile hatalıysa null döner.
+  List<T>? parseList<T>(
+    Object? body,
+    FromJson<T> fromJson, {
+    bool requireId = false,
+  }) {
+    if (body is! List) return null;
+
+    final models = <T>[];
+    for (final item in body) {
+      if (item is! Map<String, dynamic>) return null;
+      if (requireId && item['id'] == null) return null;
+
+      final model = parseModel(item, fromJson);
+      if (model == null) return null;
+      models.add(model);
+    }
+    return models;
+  }
+
+  /// { "ids": ["1", "2"] } gövdesinden id listesi çıkarır.
+  List<String>? parseIds(Object? body) {
+    if (body is! Map<String, dynamic>) return null;
+
+    final ids = body['ids'];
+    if (ids is! List) return null;
+
+    return ids.map((e) => e.toString()).toList();
+  }
+
+  String generateId() =>
+      DateTime.now().microsecondsSinceEpoch.toString() + (_idSeq++).toString();
+}
+''');
+
+  print('🧩 Ortak mixin oluşturuldu: ${file.path}\n');
 }
 
 /// pubspec.yaml içinden paket adını okur (yoksa base_backend)
@@ -573,14 +646,12 @@ void _checkDependencies() {
   final content = pubspec.readAsStringSync();
   final missingRuntime = !content.contains('json_annotation');
   final missingDev =
-      !content.contains('json_serializable') ||
-      !content.contains('build_runner');
+      !content.contains('json_serializable') || !content.contains('build_runner');
 
   if (missingRuntime || missingDev) {
     print('⚠️  Eksik paketler var, şunları çalıştır:');
     if (missingRuntime) print('   dart pub add json_annotation');
-    if (missingDev)
-      print('   dart pub add --dev build_runner json_serializable');
+    if (missingDev) print('   dart pub add --dev build_runner json_serializable');
     print('');
   }
 }
