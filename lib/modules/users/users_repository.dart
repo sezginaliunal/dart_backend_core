@@ -1,6 +1,6 @@
 import 'package:base_backend/core/services/mongo/mongo_repository.dart';
 
-import '../../../core/result/result.dart';
+import 'package:base_backend/core/result/result.dart';
 import 'users_model.dart';
 
 class UsersRepository extends MongoRepository<UsersModel> {

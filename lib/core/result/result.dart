@@ -59,3 +59,7 @@ class NotGenerateJwtFailure extends Failure {
 class JwtFailure extends Failure {
   const JwtFailure(super.message);
 }
+
+class ForbiddenFailure extends Failure {
+  const ForbiddenFailure(super.message);
+}

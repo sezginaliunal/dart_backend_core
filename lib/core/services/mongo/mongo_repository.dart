@@ -45,11 +45,23 @@ class MongoDatabase {
 
   /// Örn: mongodb://localhost:27017/my_db
   /// Atlas için: mongodb+srv://user:pass@cluster.mongodb.net/my_db
-  Future<void> connect(String uri) async {
+  Future<void> connect(String uri, {String? dbName}) async {
     if (isConnected) return;
-    final database = await Db.create(uri);
+    final fullUri = dbName == null ? uri : _withDbName(uri, dbName);
+    final database = await Db.create(fullUri);
     await database.open();
     _db = database;
+  }
+
+  /// URI'deki veritabanı adını verilen adla değiştirir (sorgu parametrelerini korur).
+  static String _withDbName(String uri, String dbName) {
+    final q = uri.indexOf('?');
+    final base = q == -1 ? uri : uri.substring(0, q);
+    final query = q == -1 ? '' : uri.substring(q);
+    final schemeEnd = base.indexOf('://') + 3;
+    final slash = base.indexOf('/', schemeEnd);
+    final root = slash == -1 ? base : base.substring(0, slash);
+    return '$root/$dbName$query';
   }
 
   DbCollection collection(String name) => db.collection(name);

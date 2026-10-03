@@ -1,13 +1,12 @@
+import 'package:base_backend/core/constants/project_constants.dart';
 import 'package:base_backend/core/result/result.dart';
 import 'package:base_backend/core/services/mongo/mongo_repository.dart';
 import 'package:base_backend/modules/auth/models/auth_user_dto.dart';
-import 'package:base_backend/modules/auth/models/register_payload.dart';
-// MongoRepository'nin bulunduğu dosyanın import'unu kendi yoluna göre ekle:
-// import 'package:base_backend/core/database/mongo_repository.dart';
 
 abstract class IAuthRepository {
-  Future<Result<RegisterPayload>> register(RegisterPayload payload);
   Future<Result<AuthUserDto?>> findUserByEmail(String email);
+  Future<Result<AuthUserDto?>> findUserById(String id);
+  Future<Result<AuthUserDto>> createUser(AuthUserDto user);
 }
 
 class AuthRepository extends MongoRepository<AuthUserDto>
@@ -20,39 +19,26 @@ class AuthRepository extends MongoRepository<AuthUserDto>
       );
 
   @override
-  Future<Result<RegisterPayload>> register(RegisterPayload payload) async {
-    try {
-      final email = payload.email.trim().toLowerCase();
-
-      // E-posta zaten kayıtlı mı?
-      final existing = await getFirst({'email': email});
-      if (existing != null) {
-        return Result.failure(ValidationFailure('Bu e-posta zaten kayıtlı.'));
-      }
-
-      await create(
-        AuthUserDto(
-          id: '', // Mongo üretecek
-          email: email,
-          name: payload.name,
-          passwordHash: payload.password, // service'te zaten hash'lendi
-        ),
-      );
-
-      // Hash'i client'a geri döndürme
-      return Result.success(payload.copyWith(email: email, password: ''));
-    } catch (e) {
-      return Result.failure(ServerFailure(e.toString()));
-    }
-  }
+  Future<Result<AuthUserDto?>> findUserByEmail(String email) =>
+      guardValue(() => getFirst({'email': email.trim().toLowerCase()}));
 
   @override
-  Future<Result<AuthUserDto?>> findUserByEmail(String email) async {
+  Future<Result<AuthUserDto?>> findUserById(String id) =>
+      guardValue(() => getById(id));
+
+  @override
+  Future<Result<AuthUserDto>> createUser(AuthUserDto user) => guard(() async {
     try {
-      final user = await getFirst({'email': email.trim().toLowerCase()});
-      return Result.success(user);
+      return Result.success(await create(user));
     } catch (e) {
-      return Result.failure(ServerFailure(e.toString()));
+      // Unique index ihlali (yarış koşulunda çift kayıt)
+      final msg = e.toString();
+      if (msg.contains('E11000') || msg.toLowerCase().contains('duplicate')) {
+        return Result.failure(
+          ValidationFailure(ProjectConstants.failures.emailAlreadyExists),
+        );
+      }
+      rethrow;
     }
-  }
+  });
 }

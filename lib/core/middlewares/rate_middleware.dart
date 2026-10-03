@@ -1,25 +1,43 @@
-import 'package:shelf/shelf.dart';
+import 'dart:io';
 import 'package:base_backend/core/result/result.dart';
 import 'package:base_backend/core/result/result_shelf_extension.dart';
+import 'package:shelf/shelf.dart';
 
 Middleware rateLimitMiddleware({
   int maxRequests = 60,
   Duration windowSize = const Duration(minutes: 1),
+  bool trustProxy = false,
 }) {
-  final Map<String, List<DateTime>> requestTracker = {};
+  final tracker = <String, List<DateTime>>{};
+  var lastCleanup = DateTime.now();
 
-  return (Handler innerHandler) {
+  String clientKey(Request request) {
+    // Sadece güvendiğin proxy arkasındaysan. Proxy'nin eklediği SON değer okunur,
+    // ilk değer istemci tarafından taklit edilebilir.
+    if (trustProxy) {
+      final fwd = request.headers['x-forwarded-for'];
+      if (fwd != null && fwd.isNotEmpty) return fwd.split(',').last.trim();
+    }
+    final info = request.context['shelf.io.connection_info'];
+    if (info is HttpConnectionInfo) return info.remoteAddress.address;
+    return 'unknown';
+  }
+
+  return (Handler inner) {
     return (Request request) async {
-      final clientIp =
-          request.headers['x-forwarded-for']?.split(',').first.trim() ??
-          request.context['shelf.io.connection_info']?.toString() ??
-          'unknown_ip';
-
       final now = DateTime.now();
       final windowStart = now.subtract(windowSize);
 
-      final timestamps = requestTracker[clientIp] ?? [];
-      timestamps.removeWhere((timestamp) => timestamp.isBefore(windowStart));
+      // Bellek sızıntısını önlemek için periyodik temizlik
+      if (now.difference(lastCleanup) > windowSize) {
+        tracker.removeWhere(
+          (_, ts) => ts.isEmpty || ts.last.isBefore(windowStart),
+        );
+        lastCleanup = now;
+      }
+
+      final timestamps = tracker.putIfAbsent(clientKey(request), () => []);
+      timestamps.removeWhere((t) => t.isBefore(windowStart));
 
       if (timestamps.length >= maxRequests) {
         return Result<Never>.failure(
@@ -28,9 +46,7 @@ Middleware rateLimitMiddleware({
       }
 
       timestamps.add(now);
-      requestTracker[clientIp] = timestamps;
-
-      return await innerHandler(request);
+      return inner(request);
     };
   };
 }

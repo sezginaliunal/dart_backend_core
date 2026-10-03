@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:dotenv/dotenv.dart';
 
 class EnvRepository {
-  // Singleton Pattern
   EnvRepository._internal();
   static final EnvRepository _instance = EnvRepository._internal();
   static EnvRepository get instance => _instance;
@@ -11,6 +10,7 @@ class EnvRepository {
   late final int port;
   late final String env;
   late final bool enableLogs;
+  bool get isProd => env == 'prod';
 
   // DB
   late final String dbUrl;
@@ -22,85 +22,93 @@ class EnvRepository {
   // JWT
   late final String jwtSecret;
   late final int jwtAccessTokenExpiryMinutes;
-  late final int jwtRefreshTokenExpiryDays;
   late final String jwtIssuer;
+  late final String jwtAudience;
+  late final int jwtRefreshTokenExpiryDays;
+  // Crypto
+  late final int pbkdf2Iterations;
 
-  // CORS
-  late final String corsAllowedOrigins;
+  // CORS & proxy
+  late final List<String> corsAllowedOrigins;
+  late final bool trustProxy;
 
-  // Rate Limiting
+  // Rate limiting
   late final int rateLimitMaxRequests;
   late final int rateLimitWindowSeconds;
-
-  // Logging
-  late final String logFilePath;
-  late final int logMaxFileSizeMb;
-  late final int logMaxBackupFiles;
+  late final int authRateLimitMaxRequests;
+  late final int authRateLimitWindowSeconds;
 
   bool _isInitialized = false;
 
-  /// .env dosyasını yükleyen ve değişkenleri ayrıştıran metod
+  /// .env varsa okur, yoksa sadece ortam değişkenlerini kullanır (Docker/Cloud).
   void init({String envPath = '.env'}) {
     if (_isInitialized) return;
 
-    final file = File(envPath);
-    if (!file.existsSync()) {
-      throw StateError('❌ Kritik Hata: $envPath dosyası bulunamadı!');
+    final loader = DotEnv(includePlatformEnvironment: true)
+      ..load(File(envPath).existsSync() ? [envPath] : const []);
+
+    String required(String key) {
+      final v = loader[key]?.trim();
+      if (v == null || v.isEmpty) {
+        throw StateError('❌ Kritik Hata: $key tanımlanmamış!');
+      }
+      return v;
     }
 
-    // dotenv paketini başlat
-    final envLoader = DotEnv(includePlatformEnvironment: true)..load([envPath]);
+    int intOf(String key, int fallback) =>
+        int.tryParse(loader[key] ?? '') ?? fallback;
 
-    // Zorunlu Alan Kontrolleri
-    if (!envLoader.isDefined('DB_URL') || envLoader['DB_URL']!.isEmpty) {
-      throw StateError('❌ Kritik Hata: .env içerisinde DB_URL tanımlanmamış!');
-    }
-    if (!envLoader.isDefined('JWT_SECRET') ||
-        envLoader['JWT_SECRET']!.isEmpty) {
-      throw StateError(
-        '❌ Kritik Hata: .env içerisinde JWT_SECRET tanımlanmamış!',
-      );
-    }
+    bool boolOf(String key, bool fallback) =>
+        (loader[key] ?? '$fallback').toLowerCase() == 'true';
 
     // App & Server
-    port = int.tryParse(envLoader['PORT'] ?? '') ?? 8080;
-    env = envLoader['ENV'] ?? 'dev';
-    enableLogs = (envLoader['ENABLE_LOGS'] ?? 'true').toLowerCase() == 'true';
+    port = intOf('PORT', 8080);
+    env = (loader['ENV'] ?? 'dev').toLowerCase();
+    enableLogs = boolOf('ENABLE_LOGS', true);
 
     // DB
-    dbUrl = envLoader['DB_URL']!;
-    dbDbName = envLoader['DB_DB_NAME'] ?? 'base_backend';
-    dbConnectTimeoutSeconds =
-        int.tryParse(envLoader['DB_CONNECT_TIMEOUT_SECONDS'] ?? '') ?? 10;
-    dbMaxRetries = int.tryParse(envLoader['DB_MAX_RETRIES'] ?? '') ?? 3;
-    dbRetryDelaySeconds =
-        int.tryParse(envLoader['DB_RETRY_DELAY_SECONDS'] ?? '') ?? 2;
+    dbUrl = required('DB_URL');
+    dbDbName = loader['DB_DB_NAME'] ?? 'base_backend';
+    dbConnectTimeoutSeconds = intOf('DB_CONNECT_TIMEOUT_SECONDS', 10);
+    dbMaxRetries = intOf('DB_MAX_RETRIES', 3);
+    dbRetryDelaySeconds = intOf('DB_RETRY_DELAY_SECONDS', 2);
 
     // JWT
-    jwtSecret = envLoader['JWT_SECRET']!;
-    jwtAccessTokenExpiryMinutes =
-        int.tryParse(envLoader['JWT_ACCESS_TOKEN_EXPIRY_MINUTES'] ?? '') ?? 15;
-    jwtRefreshTokenExpiryDays =
-        int.tryParse(envLoader['JWT_REFRESH_TOKEN_EXPIRY_DAYS'] ?? '') ?? 7;
-    jwtIssuer = envLoader['JWT_ISSUER'] ?? 'base_backend';
+    jwtSecret = required('JWT_SECRET');
+    jwtAccessTokenExpiryMinutes = intOf('JWT_ACCESS_TOKEN_EXPIRY_MINUTES', 15);
+    jwtRefreshTokenExpiryDays = intOf('JWT_REFRESH_TOKEN_EXPIRY_DAYS', 30);
+    jwtIssuer = loader['JWT_ISSUER'] ?? 'base_backend_api';
+    jwtAudience = loader['JWT_AUDIENCE'] ?? 'base_backend_clients';
 
-    // CORS
-    corsAllowedOrigins = envLoader['CORS_ALLOWED_ORIGINS'] ?? '*';
+    // Crypto
+    pbkdf2Iterations = intOf('PBKDF2_ITERATIONS', 600000);
 
-    // Rate Limiting
-    rateLimitMaxRequests =
-        int.tryParse(envLoader['RATE_LIMIT_MAX_REQUESTS'] ?? '') ?? 100;
-    rateLimitWindowSeconds =
-        int.tryParse(envLoader['RATE_LIMIT_WINDOW_SECONDS'] ?? '') ?? 60;
+    // CORS & proxy
+    corsAllowedOrigins = (loader['CORS_ALLOWED_ORIGINS'] ?? '*')
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    trustProxy = boolOf('TRUST_PROXY', false);
 
-    // Logging
-    logFilePath = envLoader['LOG_FILE_PATH'] ?? 'logs/app.log';
-    logMaxFileSizeMb =
-        int.tryParse(envLoader['LOG_MAX_FILE_SIZE_MB'] ?? '') ?? 5;
-    logMaxBackupFiles =
-        int.tryParse(envLoader['LOG_MAX_BACKUP_FILES'] ?? '') ?? 5;
+    // Rate limiting
+    rateLimitMaxRequests = intOf('RATE_LIMIT_MAX_REQUESTS', 100);
+    rateLimitWindowSeconds = intOf('RATE_LIMIT_WINDOW_SECONDS', 60);
+    authRateLimitMaxRequests = intOf('AUTH_RATE_LIMIT_MAX_REQUESTS', 10);
+    authRateLimitWindowSeconds = intOf('AUTH_RATE_LIMIT_WINDOW_SECONDS', 60);
+
+    // Güvenlik doğrulamaları
+    if (jwtSecret.length < 32) {
+      throw StateError('❌ JWT_SECRET en az 32 karakter olmalı!');
+    }
+    if (pbkdf2Iterations < 100000) {
+      throw StateError('❌ PBKDF2_ITERATIONS en az 100000 olmalı!');
+    }
+    if (isProd && corsAllowedOrigins.contains('*')) {
+      throw StateError("❌ Prod ortamında CORS_ALLOWED_ORIGINS '*' olamaz!");
+    }
 
     _isInitialized = true;
-    print('✅ EnvRepository [dotenv] ile başarıyla yüklendi: [$env modu]');
+    print('✅ Env yüklendi: [$env modu]');
   }
 }

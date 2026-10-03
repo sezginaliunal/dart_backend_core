@@ -1,13 +1,8 @@
-import 'package:json_annotation/json_annotation.dart';
-
-part 'jwt_payload.g.dart';
-
-@JsonSerializable(explicitToJson: true, createFactory: false)
 class JwtPayload {
   final String id;
-  final String issuer;
+  final String role;
 
-  JwtPayload({required this.id, required this.issuer});
+  const JwtPayload({required this.id, required this.role});
 
-  Map<String, dynamic> toJson() => _$JwtPayloadToJson(this);
+  Map<String, dynamic> toJson() => {'id': id, 'role': role};
 }

@@ -1,4 +1,6 @@
+import 'package:base_backend/core/constants/project_constants.dart';
 import 'package:base_backend/core/middlewares/auth_middleware.dart';
+import 'package:base_backend/core/middlewares/require_role_middleware.dart';
 import 'package:base_backend/core/module/app_module.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
@@ -18,7 +20,13 @@ class UsersRouter implements AppModule {
   Router get _internalRouter {
     final router = Router();
 
-    router.get('/', _controller.findAll);
+    // Tüm kullanıcıları listelemek sadece ADMIN
+    router.get(
+      '/',
+      const Pipeline()
+          .addMiddleware(requireRoleMiddleware(ProjectConstants.roleAdmin))
+          .addHandler(_controller.findAll),
+    );
     router.get('/<id>', _controller.getById);
     router.delete('/<id>', _controller.deleteById);
 
@@ -27,7 +35,7 @@ class UsersRouter implements AppModule {
 
   @override
   Handler get handler {
-    return Pipeline()
+    return const Pipeline()
         .addMiddleware(authMiddleware())
         .addHandler(_internalRouter.call);
   }

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 /// Kullanım:
+// ignore: unintended_html_in_doc_comment
 ///   dart run scripts/create_module.dart <modul_adi> [--no-build]
 ///
 /// --no-build        : build_runner'ı otomatik çalıştırma
@@ -18,7 +19,9 @@ void main(List<String> args) async {
 
   if (positional.isEmpty) {
     print('❌ Hata: Modül adı giriniz!');
-    print('Kullanım: dart run scripts/create_module.dart <modul_adi> [--no-build]');
+    print(
+      'Kullanım: dart run scripts/create_module.dart <modul_adi> [--no-build]',
+    );
     exit(1);
   }
 
@@ -41,7 +44,8 @@ void main(List<String> args) async {
 
   final files = <String, String>{
     // 1. MODEL (json_serializable)
-    '${snake}_model.dart': '''
+    '${snake}_model.dart':
+        '''
 import 'package:json_annotation/json_annotation.dart';
 
 part '${snake}_model.g.dart';
@@ -70,7 +74,8 @@ class ${pascal}Model {
 ''',
 
     // 2. REPOSITORY
-    '${snake}_repository.dart': '''
+    '${snake}_repository.dart':
+        '''
 import 'package:$pkg/core/result/result.dart';
 import '${snake}_model.dart';
 
@@ -176,7 +181,8 @@ class ${pascal}Repository {
 ''',
 
     // 3. SERVICE
-    '${snake}_service.dart': '''
+    '${snake}_service.dart':
+        '''
 import 'package:$pkg/core/result/result.dart';
 import '${snake}_model.dart';
 import '${snake}_repository.dart';
@@ -284,7 +290,8 @@ class ${pascal}Service {
 ''',
 
     // 4. CONTROLLER
-    '${snake}_controller.dart': '''
+    '${snake}_controller.dart':
+        '''
 import 'package:$pkg/core/mixins/controller_helpers.dart';
 import 'package:$pkg/core/result/result_shelf_extension.dart';
 import 'package:shelf/shelf.dart';
@@ -403,7 +410,8 @@ class ${pascal}Controller with ControllerHelpers {
 ''',
 
     // 5. ROUTER (AppModule)
-    '${snake}_router.dart': '''
+    '${snake}_router.dart':
+        '''
 import 'package:$pkg/core/middlewares/auth_middleware.dart';
 import 'package:$pkg/core/module/app_module.dart';
 import 'package:shelf/shelf.dart';
@@ -486,7 +494,9 @@ class ${pascal}Router implements AppModule {
     if (code == 0) {
       print('\n✅ ${snake}_model.g.dart üretildi.');
     } else {
-      print('\n❌ build_runner hata verdi (kod: $code). Bağımlılıkları kontrol et.');
+      print(
+        '\n❌ build_runner hata verdi (kod: $code). Bağımlılıkları kontrol et.',
+      );
     }
   }
 
@@ -516,10 +526,14 @@ void _ensureControllerHelpers(String pkg, {bool overwrite = false}) {
       final missing = required.where((m) => !content.contains(m)).toList();
 
       if (missing.isNotEmpty) {
-        print('⚠️  ${file.path} mevcut ama şu üyeler eksik: ${missing.join(', ')}');
+        print(
+          '⚠️  ${file.path} mevcut ama şu üyeler eksik: ${missing.join(', ')}',
+        );
         print('   Üretilen controller derlenmeyebilir. Güncellemek için:');
         print('   dart run scripts/create_module.dart --update-helpers');
-        print('   (eski dosya controller_helpers.dart.bak olarak yedeklenir)\n');
+        print(
+          '   (eski dosya controller_helpers.dart.bak olarak yedeklenir)\n',
+        );
       }
       return;
     }
@@ -557,7 +571,7 @@ mixin ControllerHelpers {
       ).toResponse();
 
   Response forbidden(String message) =>
-      Result<Never>.failure(UnauthorizedFailure(message)).toResponse();
+      Result<Never>.failure(ForbiddenFailure(message)).toResponse();
 
   // ───────────── Body okuma / parse ─────────────
 
@@ -646,12 +660,15 @@ void _checkDependencies() {
   final content = pubspec.readAsStringSync();
   final missingRuntime = !content.contains('json_annotation');
   final missingDev =
-      !content.contains('json_serializable') || !content.contains('build_runner');
+      !content.contains('json_serializable') ||
+      !content.contains('build_runner');
 
   if (missingRuntime || missingDev) {
     print('⚠️  Eksik paketler var, şunları çalıştır:');
     if (missingRuntime) print('   dart pub add json_annotation');
-    if (missingDev) print('   dart pub add --dev build_runner json_serializable');
+    if (missingDev) {
+      print('   dart pub add --dev build_runner json_serializable');
+    }
     print('');
   }
 }

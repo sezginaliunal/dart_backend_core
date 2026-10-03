@@ -26,7 +26,7 @@ mixin ControllerHelpers {
   ).toResponse();
 
   Response forbidden(String message) =>
-      Result<Never>.failure(UnauthorizedFailure(message)).toResponse();
+      Result<Never>.failure(ForbiddenFailure(message)).toResponse();
 
   // ───────────── Body okuma / parse ─────────────
 

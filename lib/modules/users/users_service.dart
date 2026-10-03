@@ -1,4 +1,4 @@
-import '../../../core/result/result.dart';
+import 'package:base_backend/core/result/result.dart';
 import 'users_model.dart';
 import 'users_repository.dart';
 

@@ -152,7 +152,7 @@ class CryptoRepository implements ICryptoRepository {
           NotFoundFailure(ProjectConstants.failures.fileNotFound),
         );
       }
-      return hashStream(
+      return await hashStream(
         file.openRead(),
         algorithm: algorithm,
         encoding: encoding,

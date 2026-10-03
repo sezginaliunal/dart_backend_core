@@ -1,7 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:mongo_dart/mongo_dart.dart';
 import 'package:shelf/shelf.dart';
+
+import 'package:base_backend/core/constants/project_constants.dart';
 
 import 'api_serializable.dart';
 import 'result.dart';
@@ -40,38 +43,34 @@ extension ResultShelfX<T> on Result<T> {
   }
 
   Response _handleFailure(Failure failure) {
-    final errorBody = jsonEncode({'error': failure.message});
     final headers = {'content-type': 'application/json'};
 
+    Response json(int status, String message) => Response(
+      status,
+      body: jsonEncode({'error': message}),
+      headers: headers,
+    );
+
     return switch (failure) {
-      NotFoundFailure() => Response.notFound(errorBody, headers: headers),
-      ValidationFailure() => Response.badRequest(
-        body: errorBody,
-        headers: headers,
-      ),
-      UnauthorizedFailure() => Response(401, body: errorBody, headers: headers),
-      ServerFailure() => Response.internalServerError(
-        body: errorBody,
-        headers: headers,
-      ),
-      NotGenerateJwtFailure() => Response(
-        400,
-        body: errorBody,
-        headers: headers,
-      ),
-      JwtFailure() => Response(401, body: errorBody, headers: headers),
-      TooManyRequestsFailure() => Response(
-        429,
-        body: errorBody,
-        headers: headers,
-      ),
+      NotFoundFailure() => json(404, failure.message),
+      ValidationFailure() => json(400, failure.message),
+      UnauthorizedFailure() => json(401, failure.message),
+      JwtFailure() => json(401, failure.message),
+      ForbiddenFailure() => json(403, failure.message),
+      TooManyRequestsFailure() => json(429, failure.message),
+      // Detay istemciye gitmez, sadece loga yazılır
+      ServerFailure() || NotGenerateJwtFailure() => () {
+        stderr.writeln('[ERROR] ${failure.message}');
+        return json(500, ProjectConstants.failures.unhandledException);
+      }(),
     };
   }
 
   Object? _serializeItem(dynamic item) {
     if (item == null) return null;
-    if (item is ApiSerializable)
+    if (item is ApiSerializable) {
       return item.toApiJson(); // gizli alanlı modeller
+    }
     try {
       return _sanitize((item as dynamic).toJson());
     } catch (_) {
